@@ -64,14 +64,14 @@ def start_newton_server(usd_file_path):
 
     print("[Blender] Starting Newton server subprocess...", flush=True)
 
-    newton_repo = Path("/home/dvangelder/claude_blender_newton_experiment")
-    newton_server_script = Path("/home/dvangelder/claude_blender_newton_experiment/newton_socket_server_with_policy.py")
+    newton_repo = Path.home() / "newton"
+    newton_server_script = Path("/Users/dvangelder/claude_blender_newton_experiment/newton_socket_server_with_policy.py")
     newton_log_path = "/tmp/newton_server.log"
 
     newton_log_file = open(newton_log_path, 'w')
-    venv_python = newton_repo / ".venv" / "bin" / "python"
+    # Use uv run from ~/newton directory (where MuJoCo is installed)
     newton_process = subprocess.Popen(
-        [str(venv_python), str(newton_server_script), usd_file_path],
+        ["uv", "run", "python", str(newton_server_script), usd_file_path],
         cwd=str(newton_repo),
         stdout=newton_log_file,
         stderr=subprocess.STDOUT,
@@ -278,8 +278,18 @@ def update_bodies(body_transforms):
             # Set rotation (Blender quaternion is [w, x, y, z])
             obj.rotation_mode = 'QUATERNION'
             obj.rotation_quaternion = (quat[0], quat[1], quat[2], quat[3])
+
+            # Debug: Print pelvis position to track movement
+            if body_name == 'pelvis' and hasattr(update_bodies, '_frame_count'):
+                update_bodies._frame_count += 1
+                if update_bodies._frame_count % 30 == 0:  # Print every 30 frames
+                    print(f"[Blender] Pelvis pos: x={pos[0]:.3f}, y={pos[1]:.3f}, z={pos[2]:.3f}", flush=True)
         else:
             unmatched_bodies.append(body_name)
+
+    # Initialize frame counter
+    if not hasattr(update_bodies, '_frame_count'):
+        update_bodies._frame_count = 0
 
     # Debug unmatched bodies on first frame
     if not hasattr(update_bodies, '_mismatch_printed'):
@@ -502,5 +512,5 @@ def main(usd_file_path):
 # Run main
 if __name__ == "__main__":
     # USD file path
-    USD_FILE = "/home/dvangelder/claude_blender_newton_experiment/unitree_g1/usd/g1_minimal.usd"
+    USD_FILE = "/Users/dvangelder/claude_blender_newton_experiment/unitree_g1/usd/g1_minimal.usd"
     main(USD_FILE)
