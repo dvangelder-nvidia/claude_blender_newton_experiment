@@ -25,7 +25,7 @@ newton_body_names = []
 # Rest detection
 is_at_rest = False
 rest_start_time = None
-REST_DURATION = 1.0  # 10 seconds before restart
+REST_DURATION = 10.0  # 10 seconds before restart
 
 
 def send_msg(sock, msg_dict):
@@ -64,13 +64,14 @@ def start_newton_server(usd_file_path):
 
     print("[Blender] Starting Newton server subprocess...", flush=True)
 
-    newton_repo = Path.home() / "newton"
-    newton_server_script = Path.home() / "blender_claude/newton_socket_server.py"
+    newton_repo = Path("/home/dvangelder/claude_blender_newton_experiment")
+    newton_server_script = Path("/home/dvangelder/claude_blender_newton_experiment/newton_socket_server_with_policy.py")
     newton_log_path = "/tmp/newton_server.log"
 
     newton_log_file = open(newton_log_path, 'w')
+    venv_python = newton_repo / ".venv" / "bin" / "python"
     newton_process = subprocess.Popen(
-        ["uv", "run", "python", str(newton_server_script), usd_file_path],
+        [str(venv_python), str(newton_server_script), usd_file_path],
         cwd=str(newton_repo),
         stdout=newton_log_file,
         stderr=subprocess.STDOUT,
@@ -177,17 +178,23 @@ def load_usd_into_blender(usd_file_path):
 
     print(f"[Blender] Loading USD file: {usd_file_path}", flush=True)
 
+    # Track objects before import
+    objects_before = set(bpy.data.objects)
+
     # Import USD
     bpy.ops.wm.usd_import(filepath=usd_file_path)
 
-    # Get all imported objects (they should be selected after import)
-    imported_objects = list(bpy.context.selected_objects)
+    # Get objects that were added by USD import
+    objects_after = set(bpy.data.objects)
+    imported_objects = list(objects_after - objects_before)
 
     print(f"[Blender] Imported {len(imported_objects)} objects from USD", flush=True)
 
     # Build a dictionary mapping object names to objects
-    # This allows us to match Newton bodies by name
-    body_objects = {obj.name: obj for obj in imported_objects}
+    # Include with multiple naming strategies to help matching
+    body_objects = {}
+    for obj in imported_objects:
+        body_objects[obj.name] = obj
 
     return body_objects
 
@@ -246,6 +253,23 @@ def update_bodies(body_transforms):
                     obj = obj_candidate
                     break
 
+        # Strategy 6: For specific problematic links, try alternate naming
+        if obj is None:
+            # Some USD files use different conventions
+            alt_names = []
+            if base_name.endswith('_link'):
+                name_no_suffix = base_name[:-5]
+                alt_names.extend([
+                    name_no_suffix,
+                    name_no_suffix + '_joint',
+                    name_no_suffix.replace('_', ''),
+                ])
+            # Try all alternates
+            for alt_name in alt_names:
+                obj = body_objects.get(alt_name)
+                if obj:
+                    break
+
         if obj is not None:
             matched_count += 1
             # Set position
@@ -263,6 +287,13 @@ def update_bodies(body_transforms):
         if unmatched_bodies:
             print(f"[Blender] Warning: {len(unmatched_bodies)} bodies could not be matched", flush=True)
             print(f"[Blender] Unmatched body names: {unmatched_bodies}", flush=True)
+
+            # Debug: For unmatched bodies, show what Blender objects exist with similar names
+            print(f"[Blender] Checking for similar object names:", flush=True)
+            for unmatched in unmatched_bodies[:5]:  # Check first 5
+                base = unmatched.split('/')[-1].replace('_link', '')
+                similar = [name for name in body_objects.keys() if base[:4] in name.lower()]
+                print(f"  '{unmatched}' -> looking for '{base}' -> found: {similar[:5]}", flush=True)
         update_bodies._mismatch_printed = True
 
 
@@ -429,6 +460,29 @@ def main(usd_file_path):
     light = bpy.context.active_object
     light.data.energy = 2.0
 
+    # Configure viewport for better visualization
+    for area in bpy.context.screen.areas:
+        if area.type == 'VIEW_3D':
+            for space in area.spaces:
+                if space.type == 'VIEW_3D':
+                    # Set shading to solid mode
+                    space.shading.type = 'SOLID'
+                    space.shading.light = 'STUDIO'
+                    space.shading.color_type = 'MATERIAL'
+                    # Show overlays and grid
+                    space.overlay.show_floor = True
+                    space.overlay.show_axis_x = True
+                    space.overlay.show_axis_y = True
+                    space.overlay.show_axis_z = True
+                    # Frame all objects in view
+                    for region in area.regions:
+                        if region.type == 'WINDOW':
+                            with bpy.context.temp_override(area=area, region=region):
+                                bpy.ops.view3d.view_all()
+                            break
+                    # Force redraw
+                    area.tag_redraw()
+
     # Summary
     print("\n" + "="*60, flush=True)
     print(f"Newton Server:   ✓ Running (PID: {newton_process.pid})", flush=True)
@@ -448,5 +502,5 @@ def main(usd_file_path):
 # Run main
 if __name__ == "__main__":
     # USD file path
-    USD_FILE = "/Users/dvangelder/blender_claude/unitree_g1/usd/g1_minimal.usd"
+    USD_FILE = "/home/dvangelder/claude_blender_newton_experiment/unitree_g1/usd/g1_minimal.usd"
     main(USD_FILE)

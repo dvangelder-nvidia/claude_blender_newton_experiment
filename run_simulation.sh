@@ -1,3 +1,4 @@
 #!/bin/bash
 # Launch Blender with the USD simulation
-/Applications/Blender.app/Contents/MacOS/Blender --python /Users/dvangelder/blender_claude/blender_socket_client.py
+export DISPLAY=:1
+blender --python /home/dvangelder/claude_blender_newton_experiment/blender_socket_client.py
